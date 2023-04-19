@@ -3,3 +3,5 @@
 ################################################################################
 
 /ChroMapper-BeatmapScanner/obj
+/ChroMapper-BeatmapScanner/bin/Release
+/.vs
