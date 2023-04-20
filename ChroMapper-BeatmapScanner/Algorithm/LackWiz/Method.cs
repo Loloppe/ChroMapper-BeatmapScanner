@@ -167,9 +167,9 @@ namespace BeatmapScanner.Algorithm.LackWiz
                                 {
                                     if(i < notes.Count() - 1)
                                     {
-                                        if((notes[i + 1].Time - currentBeat) - (currentBeat - previousBeat)  < 0.125)
+                                        if(notes[i + 1].Time - currentBeat - (currentBeat - previousBeat)  < 0.125)
                                         {
-                                            sliderTime = currentBeat - previousBeat;
+                                            sliderTime = notes[i + 1].Time - currentBeat;
                                             isSlider = true;
                                         }
                                         else
