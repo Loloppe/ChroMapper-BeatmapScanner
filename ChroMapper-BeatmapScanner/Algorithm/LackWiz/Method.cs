@@ -449,7 +449,6 @@ namespace BeatmapScanner.Algorithm.LackWiz
                 {
                     if (newPatternData[i].Forehand == newPatternData[i - 1].Forehand)
                     {
-                        Debug.LogWarning(newPatternData[i].Time + " is a reset");
                         newPatternData[i].Reset = true;
                     }
                     else

@@ -64,7 +64,7 @@ namespace BeatmapScanner.Algorithm
                 Helper.FindNoteDirection(red, bombs, bpm);
                 Helper.FixPatternHead(red);
                 Helper.FindReset(red);
-                ebpm = GetIntensity(red, bpm);
+                ebpm = GetEBPM(red, bpm);
                 Helper.CalculateDistance(red);
             }
 
@@ -73,7 +73,7 @@ namespace BeatmapScanner.Algorithm
                 Helper.FindNoteDirection(blue, bombs, bpm);
                 Helper.FixPatternHead(blue);
                 Helper.FindReset(blue);
-                ebpm = Math.Max(GetIntensity(blue, bpm), ebpm);
+                ebpm = Math.Max(GetEBPM(blue, bpm), ebpm);
                 Helper.CalculateDistance(blue);
             }
 
@@ -189,19 +189,15 @@ namespace BeatmapScanner.Algorithm
 
         #endregion
 
-        #region Intensity
+        #region EBPM
 
-        public static float GetIntensity(List<Cube> cubes, float bpm)
+        public static float GetEBPM(List<Cube> cubes, float bpm)
         {
             #region Prep
 
-            var intensity = 1f;
-            var speed = (Speed * bpm);
             var previous = 0f;
-            var ebpm = 0f;
-            var pbpm = 0f;
-            var count = 0;
-            var prev = cubes[0].Beat;
+            var effectiveBPM = 1000f;
+            var peakBPM = 1000f;
 
             #endregion
 
@@ -214,56 +210,39 @@ namespace BeatmapScanner.Algorithm
                     continue;
                 }
 
-                var time = (cubes[i].Beat - prev);
+                var duration = cubes[i].Beat - cubes[i - 1].Beat;
 
-                if(time > 0)
+                if (Helper.IsSameDirection(cubes[i - 1].Direction, cubes[i].Direction))
                 {
-                    if (previous == (500 / time) && (500 / time) > ebpm)
-                    {
-                        count++;
-                        ebpm = previous;
-                    }
-                    else
-                    {
-                        count = 0;
-                    }
-
-                    if ((500 / time) > pbpm)
-                    {
-                        pbpm = previous;
-                    }
-
-                    previous = (500 / time);
+                    duration /= 2;
                 }
 
-                if (cubes[i].Reset || cubes[i].Head)
+                if(duration > 0)
                 {
-                    if(time != 0f)
+                    if (previous >= duration - 0.01 && previous <= duration + 0.01 && duration < effectiveBPM)
                     {
-                        intensity += (speed / time) * Reset;
+                        effectiveBPM = duration;
                     }
-                }
-                else
-                {
-                    if (time != 0f)
-                    {
-                        intensity += speed / time;
-                    }
-                }
 
-                prev = cubes[i].Beat;
+                    if (duration < peakBPM)
+                    {
+                        peakBPM = duration;
+                    }
+
+                    previous = duration;
+                }
             }
 
             #endregion
 
-            if(ebpm == 0)
+            if(effectiveBPM == 1000)
             {
-                ebpm = pbpm;
+                effectiveBPM = peakBPM;
             }
-            ebpm *= bpm / 1000;
-            intensity /= cubes.Where(c => !c.Pattern || c.Head).Count();
 
-            return ebpm;
+            effectiveBPM = 0.5f / effectiveBPM * bpm;
+
+            return effectiveBPM;
         }
 
         #endregion

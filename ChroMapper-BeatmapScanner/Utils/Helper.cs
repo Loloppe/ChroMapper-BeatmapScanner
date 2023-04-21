@@ -205,7 +205,7 @@ namespace BeatmapScanner.Algorithm
 
             for (int i = 1; i < cubes.Count(); i++)
             {
-                if (cubes[i].Beat - cubes[i - 1].Beat <= (0.25 / 200 * bpm) && (cubes[i].Note.CutDirection == cubes[i - 1].Note.CutDirection ||
+                if (cubes[i].Beat - cubes[i - 1].Beat < 0.25 && (cubes[i].Note.CutDirection == cubes[i - 1].Note.CutDirection ||
                     cubes[i].Assumed || cubes[i - 1].Assumed || IsSameDirection(cubes[i - 1].Direction, DirectionToDegree[cubes[i].Note.CutDirection] + cubes[i].Note.AngleOffset)))
                 {
                     if (!pattern)
