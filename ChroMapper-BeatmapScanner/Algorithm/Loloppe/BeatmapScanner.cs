@@ -77,7 +77,7 @@ namespace BeatmapScanner.Algorithm
                 Helper.CalculateDistance(blue);
             }
 
-            (pass, tech, data) = Method.UseLackWizAlgorithm(red.Select(c => c.Note).ToList(), blue.Select(c => c.Note).ToList(), bpm);
+            (pass, tech, data) = Method.UseLackWizAlgorithm(red, blue, bpm);
 
             #endregion
 

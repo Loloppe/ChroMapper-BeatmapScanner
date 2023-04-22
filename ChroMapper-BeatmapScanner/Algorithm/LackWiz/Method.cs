@@ -1,18 +1,18 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
 using System;
-using Beatmap.Base;
 using UnityEngine;
+using BeatmapScanner.Algorithm.Loloppe;
 
 namespace BeatmapScanner.Algorithm.LackWiz
 {
     internal class Method
     {
-        public static int[] CutDirectionIndex = { 90, 270, 180, 0, 135, 45, 225, 315, 270 };
+        public static double[] CutDirectionIndex = { 90, 270, 180, 0, 135, 45, 225, 315, 270 };
 
         #region Main
 
-        public static (double diff, double tech, List<SwingData> data) UseLackWizAlgorithm(List<BaseNote> red, List<BaseNote> blue, double bpm)
+        public static (double diff, double tech, List<SwingData> data) UseLackWizAlgorithm(List<Cube> red, List<Cube> blue, double bpm)
         {
             double diff = 0;
             double tech = 0;
@@ -58,15 +58,7 @@ namespace BeatmapScanner.Algorithm.LackWiz
                 {
                     SwingCurveCalc(blueSwingData, true);
                     diff = Math.Max(DiffToPass(blueSwingData, bpm), diff);
-                    if(stamina != 0)
-                    {
-                        stamina += StaminaCalc(blueSwingData);
-                        stamina /= 2;
-                    }
-                    else
-                    {
-                        stamina = StaminaCalc(blueSwingData);
-                    }
+                    stamina = Math.Max(StaminaCalc(blueSwingData), stamina);
                 }
                 data.AddRange(blueSwingData);
             }
@@ -88,179 +80,139 @@ namespace BeatmapScanner.Algorithm.LackWiz
 
         #region SwingProcesser
 
-        public static List<SwingData> SwingProcesser(List<BaseNote> notes)
+        public static List<SwingData> SwingProcesser(List<Cube> cubes)
         {
             var swingData = new List<SwingData>();
+            double first = 0;
 
-            for(int i = 0; i < notes.Count; i++)
+            if(cubes.Count() == 0)
             {
-                var isSlider = false;
-                double sliderTime = 0;
-                double guideAngle;
+                return swingData;
+            }
 
-                var currentBeat = notes[i].Time;
-                var currentAngle = (double)(CutDirectionIndex[notes[i].CutDirection] + notes[i].AngleOffset);
-                (double x, double y) currentPosition = (notes[i].PosX, notes[i].PosY);
-
-                if(i > 0)
+            if (cubes[0].Note.CutDirection == 8)
+            {
+                var c = cubes.Where(ca => ca.Note.CutDirection != 8).FirstOrDefault();
+                if (c != null)
                 {
-                    #region Pre-caching
-                    var previousBeat = notes[i - 1].Time;
-                    var previousAngle = swingData.Last().Angle;
-                    (double x, double y) previousPosition = (notes[i - 1].PosX, notes[i - 1].PosY);
-                    if(notes[i].CutDirection == 8)
+                    first = CutDirectionIndex[c.Note.CutDirection] + c.Note.AngleOffset;
+                    for(int i = cubes.IndexOf(c); i > 1 ; i--)
                     {
-                        if (currentBeat - previousBeat <= 0.03125)
+                        if (cubes[i].Beat - cubes[i - 1].Beat >= 0.25)
                         {
-                            currentAngle = previousAngle;
-                        }
-                        else
-                        {
-                            if (previousAngle >= 180)
-                            {
-                                currentAngle = previousAngle - 180;
-                            }
-                            else
-                            {
-                                currentAngle = previousAngle + 180;
-                            }
-                        }
-                    }
-
-                    #endregion
-
-                    if(currentBeat - previousBeat >= 0.03125)
-                    {
-                        if(currentBeat - previousBeat >= 0.125)
-                        {
-                            if(currentBeat - previousBeat >= 0.5)
-                            {
-                                swingData.Add(new SwingData(currentBeat, currentAngle));
-                                (swingData.Last().EntryPosition, swingData.Last().ExitPosition) = MathWiz.CalculateBaseEntryExit(currentPosition, currentAngle);
-                            }
-                            else
-                            {
-                                if (notes[i].CutDirection != 8)
-                                {
-                                    if (Math.Abs(currentAngle - previousAngle) < 112.5)
-                                    {
-                                        var testAngleFromPosition = MathWiz.ConvertRadiansToDegrees(Math.Atan2(previousPosition.y - currentPosition.y, previousPosition.x - currentPosition.x)) % 360;
-                                        var averageAngleOfBlocks = (currentAngle + previousAngle) / 2;
-                                        if (Math.Abs(testAngleFromPosition - averageAngleOfBlocks) <= 56.25)
-                                        {
-                                            sliderTime = currentBeat - previousBeat;
-                                            isSlider = true;
-                                        }
-                                        else
-                                        {
-                                            swingData.Add(new SwingData(currentBeat, currentAngle));
-                                            (swingData.Last().EntryPosition, swingData.Last().ExitPosition) = MathWiz.CalculateBaseEntryExit(currentPosition, currentAngle);
-                                        }
-                                    }
-                                    else
-                                    {
-                                        swingData.Add(new SwingData(currentBeat, currentAngle));
-                                        (swingData.Last().EntryPosition, swingData.Last().ExitPosition) = MathWiz.CalculateBaseEntryExit(currentPosition, currentAngle);
-                                    }
-                                }
-                                else
-                                {
-                                    if(i < notes.Count() - 1)
-                                    {
-                                        if(notes[i + 1].Time - currentBeat - (currentBeat - previousBeat)  < 0.125)
-                                        {
-                                            sliderTime = notes[i + 1].Time - currentBeat;
-                                            isSlider = true;
-                                        }
-                                        else
-                                        {
-                                            swingData.Add(new SwingData(currentBeat, currentAngle));
-                                            (swingData.Last().EntryPosition, swingData.Last().ExitPosition) = MathWiz.CalculateBaseEntryExit(currentPosition, currentAngle);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        else 
-                        {
-                            if (notes[i].CutDirection == 8 || Math.Abs(currentAngle - previousAngle) < 90)
-                            {
-                                sliderTime = 0.125;
-                                isSlider = true;
-                            }
-                            else
-                            {
-                                swingData.Add(new SwingData(currentBeat, currentAngle));
-                                (swingData.Last().EntryPosition, swingData.Last().ExitPosition) = MathWiz.CalculateBaseEntryExit(currentPosition, currentAngle);
-                            }
-                        }
-                    }
-                    else 
-                    {
-                        sliderTime = 0.03125;
-                        isSlider = true;
-                    }
-                    
-                    if(isSlider)
-                    {
-                        for (int f = i; f > 0; f--)
-                        {
-                            if (notes[f].Time - notes[f - 1].Time > 1.5 * sliderTime)
-                            {
-                                previousBeat = notes[f].Time;
-                                previousPosition = (notes[f].PosX, notes[f].PosY);
-                                break;
-                            }
-                        }
-
-                        currentAngle = MathWiz.ConvertRadiansToDegrees(Math.Atan2(previousPosition.y - currentPosition.y, previousPosition.x - currentPosition.x)) % 360;
-                        if (swingData.Count() > 1)
-                        {
-                            guideAngle = (swingData[swingData.Count() - 2].Angle - 180) % 360;
-                        }
-                        else
-                        {
-                            guideAngle = 270;
-                        }
-                        for (int f = i; f > 0; f--)
-                        {
-                            if (notes[f].Time < previousBeat)
-                            {
-                                break;
-                            }
-                            if (notes[f].CutDirection != 8)
-                            {
-                                guideAngle = CutDirectionIndex[notes[f].CutDirection];
-                                break;
-                            }
-                        }
-                        if(Math.Abs(currentAngle - guideAngle) > 90)
-                        {
-                            if(currentAngle >= 180)
-                            {
-                                currentAngle -= 180;
-                            }
-                            else
-                            {
-                                currentAngle += 180;
-                            }
-                        }
-
-                        swingData.Last().Angle = currentAngle;
-
-                        var xtest = (swingData.Last().EntryPosition.x - (currentPosition.x * 0.333333 - Math.Cos(MathWiz.ConvertDegreesToRadians(currentAngle)) * 0.166667 + 0.166667)) * Math.Cos(MathWiz.ConvertDegreesToRadians(currentAngle));
-                        var ytest = (swingData.Last().EntryPosition.y - (currentPosition.y * 0.333333 - Math.Sin(MathWiz.ConvertDegreesToRadians(currentAngle)) * 0.166667 + 0.166667)) * Math.Sin(MathWiz.ConvertDegreesToRadians(currentAngle));
-                        if (xtest <= 0.001 && ytest >= 0.001)
-                        {
-                            swingData.Last().EntryPosition = (currentPosition.x * 0.333333 - Math.Cos(MathWiz.ConvertDegreesToRadians(currentAngle)) * 0.166667 + 0.166667, currentPosition.y * 0.333333 - Math.Sin(MathWiz.ConvertDegreesToRadians(currentAngle)) * 0.166667 + 0.166667);
-                        }
-                        else
-                        {
-                            swingData.Last().ExitPosition =  (currentPosition.x * 0.333333 + Math.Cos(MathWiz.ConvertDegreesToRadians(currentAngle)) * 0.166667 + 0.166667, currentPosition.y * 0.333333 + Math.Sin(MathWiz.ConvertDegreesToRadians(currentAngle)) * 0.166667 + 0.166667);
+                            first = Helper.ReverseCutDirection(first);
                         }
                     }
                 }
                 else
+                {
+                    if (cubes[0].Note.PosY == 2)
+                    {
+                        first = 90;
+                    }
+                    else
+                    {
+                        first = 270;
+                    }
+                }
+            }
+            else
+            {
+                first = CutDirectionIndex[cubes[0].Note.CutDirection] + cubes[0].Note.AngleOffset;
+            }
+
+            swingData.Add(new SwingData(cubes[0].Note.Time, first)); ;
+            (swingData.Last().EntryPosition, swingData.Last().ExitPosition) = MathWiz.CalculateBaseEntryExit((cubes[0].Note.PosX, cubes[0].Note.PosY), first);
+
+            Helper.FixPatternHead(cubes);
+
+            for (int i = 1; i < cubes.Count; i++)
+            {
+                if (cubes[0].Beat == cubes[i].Beat && cubes[i].Note.CutDirection == 8 && cubes[i - 1].Note.CutDirection == 8)
+                {
+                    continue;
+                }
+
+                var pattern = false;
+
+                var previousBeat = cubes[i - 1].Beat;
+                var previousAngle = swingData.Last().Angle;
+                (double x, double y) previousPosition = (cubes[i - 1].Note.PosX, cubes[i - 1].Note.PosY);
+
+                var currentBeat = cubes[i].Beat;
+                var currentAngle = CutDirectionIndex[cubes[i].Note.CutDirection] + cubes[i].Note.AngleOffset;
+                (double x, double y) currentPosition = (cubes[i].Note.PosX, cubes[i].Note.PosY);
+                
+                if(currentBeat - previousBeat < 0.245 && (currentAngle == previousAngle || cubes[i].Note.CutDirection == 8 
+                    || cubes[i - 1].Note.CutDirection == 8))
+                {
+                    pattern = true;
+                }
+                else if(currentBeat - previousBeat < 0.255 && Helper.IsSameDirection(previousAngle, currentAngle))
+                {
+                    pattern = true;
+                }
+
+                if (cubes[i].Note.CutDirection == 8 && !pattern)
+                {
+                    swingData.Add(new SwingData(currentBeat, Helper.ReverseCutDirection(previousAngle)));
+                    (swingData.Last().EntryPosition, swingData.Last().ExitPosition) = MathWiz.CalculateBaseEntryExit(currentPosition, Helper.ReverseCutDirection(previousAngle));
+                }
+                else if(pattern)
+                {
+                    for (int f = i; f > 0; f--) // Find pattern head
+                    {
+                        if (cubes[f].Beat - cubes[f - 1].Beat >= 0.25)
+                        {
+                            previousBeat = cubes[f].Beat;
+                            previousPosition = (cubes[f].Note.PosX, cubes[f].Note.PosY);
+                            break;
+                        }
+                        if(f == 1)
+                        {
+                            previousBeat = cubes[0].Beat;
+                            previousPosition = (cubes[0].Note.PosX, cubes[0].Note.PosY);
+                        }
+                    }
+
+                    currentAngle = Helper.Mod(MathWiz.ConvertRadiansToDegrees(Math.Atan2(previousPosition.y - currentPosition.y, previousPosition.x - currentPosition.x)), 360);
+                    double guideAngle = 270;
+                    if (swingData.Count() > 1)
+                    {
+                        guideAngle = Helper.Mod((swingData[swingData.Count() - 2].Angle - 180), 360);
+                    }
+
+                    for (int f = i; f > 0; f--)
+                    {
+                        if (cubes[f].Beat < previousBeat)
+                        {
+                            break;
+                        }
+                        if (cubes[f].Note.CutDirection != 8)
+                        {
+                            guideAngle = CutDirectionIndex[cubes[f].Note.CutDirection] + cubes[f].Note.AngleOffset;
+                            break;
+                        }
+                    }
+                    if (Math.Abs(currentAngle - guideAngle) > 90)
+                    {
+                        currentAngle = Helper.ReverseCutDirection(currentAngle);
+                    }
+
+                    swingData.Last().Angle = currentAngle;
+
+                    var xtest = (swingData.Last().EntryPosition.x - (currentPosition.x * 0.333333 - Math.Cos(MathWiz.ConvertDegreesToRadians(currentAngle)) * 0.166667 + 0.166667)) * Math.Cos(MathWiz.ConvertDegreesToRadians(currentAngle));
+                    var ytest = (swingData.Last().EntryPosition.y - (currentPosition.y * 0.333333 - Math.Sin(MathWiz.ConvertDegreesToRadians(currentAngle)) * 0.166667 + 0.166667)) * Math.Sin(MathWiz.ConvertDegreesToRadians(currentAngle));
+                    if (xtest <= 0.001 && ytest >= 0.001)
+                    {
+                        swingData.Last().EntryPosition = (currentPosition.x * 0.333333 - Math.Cos(MathWiz.ConvertDegreesToRadians(currentAngle)) * 0.166667 + 0.166667, currentPosition.y * 0.333333 - Math.Sin(MathWiz.ConvertDegreesToRadians(currentAngle)) * 0.166667 + 0.166667);
+                    }
+                    else
+                    {
+                        swingData.Last().ExitPosition = (currentPosition.x * 0.333333 + Math.Cos(MathWiz.ConvertDegreesToRadians(currentAngle)) * 0.166667 + 0.166667, currentPosition.y * 0.333333 + Math.Sin(MathWiz.ConvertDegreesToRadians(currentAngle)) * 0.166667 + 0.166667);
+                    }
+                }
+                else if(!pattern)
                 {
                     swingData.Add(new SwingData(currentBeat, currentAngle));
                     (swingData.Last().EntryPosition, swingData.Last().ExitPosition) = MathWiz.CalculateBaseEntryExit(currentPosition, currentAngle);
@@ -398,36 +350,42 @@ namespace BeatmapScanner.Algorithm.LackWiz
                 {
                     if (i > 0)
                     {
-                        if (Math.Abs(testData1[i].Angle - testData1[i - 1].Angle) >= 67.5)
+                        if (Helper.IsSameDirection(testData1[i - 1].Angle, testData1[i].Angle))
                         {
-                            testData1[i].Forehand = !testData1[i - 1].Forehand;
+                            testData1[i].Reset = true;
+                            testData1[i].Forehand = testData1[i - 1].Forehand;
                         }
                         else
                         {
-                            testData1[i].Forehand = testData1[i - 1].Forehand;
+                            testData1[i].Reset = false;
+                            testData1[i].Forehand = !testData1[i - 1].Forehand;
                         }
                     }
                     else
                     {
                         testData1[0].Forehand = true;
+                        testData1[0].Reset = false;
                     }
                 }
                 for (int i = 0; i < testData2.Count(); i++)
                 {
                     if (i > 0)
                     {
-                        if (Math.Abs(testData2[i].Angle - testData2[i - 1].Angle) >= 67.5)
+                        if (Helper.IsSameDirection(testData2[i - 1].Angle, testData2[i].Angle))
                         {
-                            testData2[i].Forehand = !testData2[i - 1].Forehand;
+                            testData2[i].Reset = true;
+                            testData2[i].Forehand = testData2[i - 1].Forehand;
                         }
                         else
                         {
-                            testData2[i].Forehand = testData2[i - 1].Forehand;
+                            testData2[i].Reset = false;
+                            testData2[i].Forehand = !testData2[i - 1].Forehand;
                         }
                     }
                     else
                     {
                         testData2[0].Forehand = false;
+                        testData2[0].Reset = false;
                     }
                 }
 
@@ -445,21 +403,6 @@ namespace BeatmapScanner.Algorithm.LackWiz
             for (int i = 0; i < newPatternData.Count(); i++)
             {
                 newPatternData[i].AngleStrain = MathWiz.SwingAngleStrainCalc(new List<SwingData> { newPatternData[i] }, leftOrRight);
-                if (i > 0)
-                {
-                    if (newPatternData[i].Forehand == newPatternData[i - 1].Forehand)
-                    {
-                        newPatternData[i].Reset = true;
-                    }
-                    else
-                    {
-                        newPatternData[i].Reset = false;
-                    }
-                }
-                else
-                {
-                    newPatternData[i].Reset = false;
-                }
             }
 
             return newPatternData;
@@ -513,24 +456,27 @@ namespace BeatmapScanner.Algorithm.LackWiz
                 double distance = 0;
                 for (int f = 1; f < point.Count(); f++)
                 {
-                    angleList.Add(MathWiz.ConvertRadiansToDegrees(Math.Atan2(point[f].y - point[f - 1].y, point[f].x - point[f - 1].x)) % 360);
+                    angleList.Add(Helper.Mod(MathWiz.ConvertRadiansToDegrees(Math.Atan2(point[f].y - point[f - 1].y, point[f].x - point[f - 1].x)), 360));
                     distance += Math.Sqrt(Math.Pow(point[f].y - point[f - 1].y, 2) + Math.Pow(point[f].x - point[f - 1].x, 2));
                     if (f > 1)
                     {
                         angleChangeList.Add(180 - Math.Abs(Math.Abs(angleList.Last() - angleList[angleList.Count() - 2]) - 180));
                     }
                 }
-
-                distance -= 0.75;
                 
                 if (i > 1)
                 {
                     simHandCurPos = swingData[i].EntryPosition;
-                    if (swingData[i].Forehand == swingData[i - 2].Forehand)
+                    if (!swingData[i].Reset && !swingData[i - 1].Reset)
                     {
                         simHandPrePos = swingData[i - 2].EntryPosition;
                     }
-                    else if (swingData[i].Forehand == swingData[i - 1].Forehand)
+                    else if (!swingData[i].Reset && swingData[i - 1].Reset)
+                    {
+                        simHandPrePos = swingData[i - 1].EntryPosition;
+
+                    }
+                    else if (swingData[i].Reset)
                     {
                         simHandPrePos = swingData[i - 1].EntryPosition;
                     }
