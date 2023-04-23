@@ -181,7 +181,7 @@ namespace BeatmapScanner.Algorithm
             return false;
         }
 
-        public static void FindNoteDirection(List<Cube> cubes, List<BaseNote> bombs, float bpm)
+        public static void FindNoteDirection(List<Cube> cubes, List<BaseNote> bombs)
         {
             if (cubes[0].Note.CutDirection == 8)
             {
