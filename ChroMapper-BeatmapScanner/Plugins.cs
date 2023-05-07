@@ -48,15 +48,15 @@ namespace ChroMapper_BeatmapScanner
                         if (_noteGridContainer.LoadedObjects.Any())
                         {
                             List<BaseNote> notes = _noteGridContainer.LoadedObjects.Cast<BaseNote>().Where(n => n.Type != 3).ToList();
-                            notes = notes.OrderBy(o => o.Time).ToList();
+                            notes = notes.OrderBy(o => o.JsonTime).ToList();
 
-                            if(notes.Count >= 50)
+                            if(notes.Count > 0)
                             {
                                 List<BaseNote> bombs = _noteGridContainer.LoadedObjects.Cast<BaseNote>().Where(n => n.Type == 3).ToList();
-                                bombs = bombs.OrderBy(b => b.Time).ToList();
+                                bombs = bombs.OrderBy(b => b.JsonTime).ToList();
 
                                 List<BaseObstacle> obstacles = _obstacleGridContainer.LoadedObjects.Cast<BaseObstacle>().ToList();
-                                obstacles = obstacles.OrderBy(o => o.Time).ToList();
+                                obstacles = obstacles.OrderBy(o => o.JsonTime).ToList();
 
                                 (Diff, Tech, EBPM, Slider, Reset, Bomb, Crouch, Linear) = BeatmapScanner.Algorithm.BeatmapScanner.Analyzer(notes, bombs, obstacles, BeatSaberSongContainer.Instance.Song.BeatsPerMinute);
 

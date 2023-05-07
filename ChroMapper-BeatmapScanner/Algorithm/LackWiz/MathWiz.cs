@@ -125,7 +125,7 @@ namespace BeatmapScanner.Algorithm.LackWiz
                 }
             }
 
-            return strainAmount * 2;
+            return strainAmount;
         }
 
         public static double BezierAngleStrainCalc(List<double> angleData, bool forehand, bool leftOrRight)

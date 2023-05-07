@@ -67,4 +67,7 @@
     <Compile Include="Utils\MathUtil.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <PropertyGroup>
+    <PostBuildEvent>xcopy /y /d  "C:\Users\Laure\source\repos\ChroMapper-BeatmapScanner\ChroMapper-BeatmapScanner\obj\Release\*.dll" "C:\Users\Laure\OneDrive\Bureau\CM\chromapper\Plugins"</PostBuildEvent>
+  </PropertyGroup>
 </Project>

@@ -3,6 +3,7 @@ using System.Linq;
 using System;
 using UnityEngine;
 using BeatmapScanner.Algorithm.Loloppe;
+using Beatmap.Base;
 
 namespace BeatmapScanner.Algorithm.LackWiz
 {
@@ -12,7 +13,7 @@ namespace BeatmapScanner.Algorithm.LackWiz
 
         #region Main
 
-        public static (double diff, double tech, List<SwingData> data) UseLackWizAlgorithm(List<Cube> red, List<Cube> blue, double bpm)
+        public static (double diff, double tech, List<SwingData> data) UseLackWizAlgorithm(List<Cube> red, List<Cube> blue, double bpm, List<BaseNote> bombs)
         {
             double leftDiff = 0;
             double rightDiff = 0;
@@ -27,19 +28,23 @@ namespace BeatmapScanner.Algorithm.LackWiz
 
             if (red.Count() > 2)
             {
+                FlowDetector(red, bombs, false);
                 redSwingData = SwingProcesser(red);
-                if(redSwingData != null)
+                if (redSwingData != null)
                 {
                     redPatternData = PatternSplitter(redSwingData);
                 }
-                if(redSwingData != null && redPatternData != null)
+                if (redSwingData != null && redPatternData != null)
                 {
                     redSwingData = ParityPredictor(redPatternData, false);
                 }
                 if (redSwingData != null)
                 {
                     SwingCurveCalc(redSwingData, false);
-                    leftDiff = DiffToPass(redSwingData, bpm);
+                    redSwingData = CalcSwingDiff(redSwingData, bpm);
+                    leftDiff = DiffToPass(redSwingData, 8);
+                    leftDiff += DiffToPass(redSwingData, 50);
+                    leftDiff /= 2;
                     leftStamina = StaminaCalc(redSwingData);
                 }
                 data.AddRange(redSwingData);
@@ -47,6 +52,7 @@ namespace BeatmapScanner.Algorithm.LackWiz
 
             if (blue.Count() > 2)
             {
+                FlowDetector(blue, bombs, true);
                 blueSwingData = SwingProcesser(blue);
                 if (blueSwingData != null)
                 {
@@ -59,23 +65,359 @@ namespace BeatmapScanner.Algorithm.LackWiz
                 if (blueSwingData != null)
                 {
                     SwingCurveCalc(blueSwingData, true);
-                    rightDiff = DiffToPass(blueSwingData, bpm);
+                    blueSwingData = CalcSwingDiff(blueSwingData, bpm);
+                    rightDiff = DiffToPass(blueSwingData, 8);
+                    rightDiff += DiffToPass(blueSwingData, 50);
+                    rightDiff /= 2;
                     rightStamina = StaminaCalc(blueSwingData);
                 }
                 data.AddRange(blueSwingData);
             }
 
-            if(data.Count() > 2)
+            if (data.Count() > 2)
             {
                 var test = data.Select(c => c.AngleStrain + c.PathStrain).ToList();
                 test.Sort();
                 tech = test.Skip((int)(data.Count() * 0.25)).Average();
             }
 
-            var balanced_tech = tech * (-1 * Math.Pow(1.4, -Math.Max(leftDiff, rightDiff)) + 1) * 10;
-            var balanced_pass = Math.Max(leftDiff * leftStamina, rightDiff * rightStamina);
+            var balanced_tech = tech * (-1 * Math.Pow(1.4, -Math.Max(leftDiff, rightDiff) * 0.9) + 1) * 10;
+            var balanced_pass = Math.Max(leftDiff * leftStamina, rightDiff * rightStamina) * 0.9;
 
             return (balanced_pass, balanced_tech, data);
+        }
+
+        #endregion
+
+        #region FlowDetector
+        public static void FlowDetector(List<Cube> cubes, List<BaseNote> bombs, bool leftOrRight)
+        {
+            if(cubes.Count() < 2)
+            {
+                return;
+            }
+
+            double testValue = 45;
+
+            if(leftOrRight)
+            {
+                testValue = -45;
+            }
+
+            cubes.OrderBy(c => c.Time);
+            Helper.HandlePattern(cubes);
+
+            BaseNote bomb = null;
+
+            if (cubes[0].CutDirection == 8)
+            {
+                if (cubes[1].CutDirection != 8 && cubes[1].Time - cubes[0].Time <= 0.125)
+                {
+                    cubes[0].Direction = Helper.Mod(CutDirectionIndex[cubes[1].CutDirection] + cubes[1].AngleOffset, 360);
+                }
+                else
+                {
+                    var c = cubes.Where(ca => ca.CutDirection != 8).FirstOrDefault();
+                    if (c != null)
+                    {
+                        cubes[0].Direction = CutDirectionIndex[c.CutDirection] + c.AngleOffset;
+                        for (int i = cubes.IndexOf(c); i > 0; i--)
+                        {
+                            if (cubes[i].Time - cubes[i - 1].Time >= 0.25)
+                            {
+                                cubes[0].Direction = Helper.ReverseCutDirection(cubes[0].Direction);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        if (cubes[0].Layer >= 2)
+                        {
+                            cubes[0].Direction = 90;
+                        }
+                        else
+                        {
+                            cubes[0].Direction = 270;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                cubes[0].Direction = CutDirectionIndex[cubes[0].CutDirection] + cubes[0].AngleOffset;
+            }
+
+            if (cubes[1].CutDirection == 8)
+            {
+                if ((cubes[1].Time - cubes[0].Time <= 0.125 && Helper.IsSlider(cubes[0], cubes[1], cubes[0].Direction, true)) || cubes[1].Time - cubes[0].Time <= 0.125)
+                {
+                    cubes[1].Direction = Helper.FindAngleViaPosition(cubes, 1, 0, cubes[0].Direction, true);
+                    if (cubes[0].CutDirection == 8)
+                    {
+                        cubes[0].Direction = cubes[1].Direction;
+                    }
+                    cubes[1].Pattern = true;
+                    cubes[0].Pattern = true;
+                    cubes[0].Head = true;
+                }
+                else
+                {
+                    bomb = bombs.LastOrDefault(b => cubes[0].Time < b.JsonTime && cubes[1].Time >= b.JsonTime && cubes[1].Line == b.PosX);
+                    if (bomb != null)
+                    {
+                        if (bomb.PosY == 0)
+                        {
+                            cubes[1].Direction = 270;
+                        }
+                        else if (bomb.PosY == 1)
+                        {
+                            if (cubes[1].Layer == 0)
+                            {
+                                cubes[1].Direction = 90;
+                            }
+                            else
+                            {
+                                cubes[1].Direction = 270;
+                            }
+                        }
+                        else if (bomb.PosY == 2)
+                        {
+                            cubes[1].Direction = 90;
+                        }
+                        cubes[1].Bomb = true;
+                    }
+                    else
+                    {
+                        cubes[1].Direction = Helper.FindAngleViaPosition(cubes, 1, 0, cubes[0].Direction, false);
+                    }
+                }
+            }
+            else
+            {
+                if ((cubes[1].Time - cubes[0].Time <= 0.125 && Helper.IsSlider(cubes[0], cubes[1], cubes[0].Direction, true)) || cubes[1].Time - cubes[0].Time <= 0.125)
+                {
+                    cubes[0].Head = true;
+                    cubes[0].Pattern = true;
+                    cubes[1].Pattern = true;
+                }
+                cubes[1].Direction = Helper.Mod(CutDirectionIndex[cubes[1].CutDirection] + cubes[1].AngleOffset, 360);
+            }
+
+            for (int i = 2; i < cubes.Count() - 1; i++)
+            {
+                if (cubes[i].CutDirection == 8)
+                {
+                    // Pattern
+                    if ((cubes[i].Time - cubes[i - 1].Time <= 0.25 && Helper.IsSlider(cubes[i - 1], cubes[i], cubes[i - 1].Direction, true))
+                        || cubes[i].Time - cubes[i - 1].Time < 0.125)
+                    {
+                        cubes[i].Direction = Helper.FindAngleViaPosition(cubes, i, i - 1, cubes[i - 1].Direction, true);
+                        if (cubes[i - 1].CutDirection == 8)
+                        {
+                            cubes[i - 1].Direction = cubes[i].Direction;
+                        }
+                        cubes[i].Bomb = cubes[i - 1].Bomb;
+                        cubes[i].Pattern = true;
+                        if (!cubes[i - 1].Pattern)
+                        {
+                            cubes[i - 1].Pattern = true;
+                            cubes[i - 1].Head = true;
+                        }
+                        continue;
+                    }
+                    else // Probably not a pattern
+                    {
+                        bomb = bombs.LastOrDefault(b => cubes[i - 1].Time < b.JsonTime && cubes[i].Time >= b.JsonTime && cubes[i].Line == b.PosX);
+                        if (bomb != null)
+                        {
+                            if (bomb.PosY == 0)
+                            {
+                                cubes[i].Direction = 270;
+                            }
+                            else if (bomb.PosY == 1)
+                            {
+                                if (cubes[i].Layer == 0)
+                                {
+                                    cubes[i].Direction = 90;
+                                }
+                                else
+                                {
+                                    cubes[i].Direction = 270;
+                                }
+                            }
+                            else if (bomb.PosY == 2)
+                            {
+                                cubes[i].Direction = 90;
+                            }
+                            cubes[i].Bomb = true;
+                            continue;
+                        }
+
+                        cubes[i].Direction = Helper.FindAngleViaPosition(cubes, i, i - 1, cubes[i - 1].Direction, false);
+                    }
+
+                    // Check if the flow work
+                    if (!Helper.IsSameDirection(cubes[i - 1].Direction, cubes[i].Direction))
+                    {
+                        if (cubes[i + 1].CutDirection != 8)
+                        {
+                            // If the next note is an arrow, we want to check that too
+                            var nextDir = Helper.Mod(CutDirectionIndex[cubes[i + 1].CutDirection] + cubes[i + 1].AngleOffset, 360);
+                            if (Helper.IsSameDirection(cubes[i].Direction, nextDir))
+                            {
+                                // Attempt a different angle
+                                if (!Helper.IsSameDirection(cubes[i].Direction + testValue, nextDir))
+                                {
+                                    cubes[i].Direction = Helper.Mod(cubes[i].Direction + testValue, 360);
+                                    continue; // Work
+                                }
+                                else if (!Helper.IsSameDirection(cubes[i].Direction - testValue, nextDir))
+                                {
+                                    cubes[i].Direction = Helper.Mod(cubes[i].Direction - testValue, 360);
+                                    continue; // Work
+                                }
+                            }
+                        }
+                        continue;
+                    }
+                    if (!Helper.IsSameDirection(cubes[i - 1].Direction, cubes[i].Direction + testValue))
+                    {
+                        cubes[i].Direction = Helper.Mod(cubes[i].Direction + testValue, 360);
+                        continue; // Work
+                    }
+                    else if (!Helper.IsSameDirection(cubes[i - 1].Direction, cubes[i].Direction - testValue))
+                    {
+                        cubes[i].Direction = Helper.Mod(cubes[i].Direction - testValue, 360);
+                        continue; // Work
+                    }
+
+                    // Maybe the note before is wrong?
+                    if (cubes[i - 1].CutDirection == 8 && !Helper.IsSameDirection(cubes[i - 2].Direction, cubes[i - 1].Direction + testValue))
+                    {
+                        var lastDir = Helper.Mod(cubes[i - 1].Direction + testValue, 360);
+                        if (!Helper.IsSameDirection(lastDir, cubes[i].Direction + testValue * 2))
+                        {
+                            cubes[i - 1].Direction = Helper.Mod(cubes[i - 1].Direction + testValue, 360);
+                            cubes[i].Direction = Helper.Mod(cubes[i].Direction + testValue * 2, 360);
+                            continue; // Work
+                        }
+                    }
+                    else if (cubes[i - 1].CutDirection == 8 && !Helper.IsSameDirection(cubes[i - 2].Direction, cubes[i - 1].Direction - testValue))
+                    {
+                        var lastDir = Helper.Mod(cubes[i - 1].Direction - testValue, 360);
+                        if (!Helper.IsSameDirection(lastDir, cubes[i].Direction - testValue * 2))
+                        {
+                            cubes[i - 1].Direction = Helper.Mod(cubes[i - 1].Direction - testValue, 360);
+                            cubes[i].Direction = Helper.Mod(cubes[i].Direction - testValue * 2, 360);
+                            continue; // Work
+                        }
+                    }
+                }
+                else
+                {
+                    cubes[i].Direction = Helper.Mod(CutDirectionIndex[cubes[i].CutDirection] + cubes[i].AngleOffset, 360);
+                    if ((cubes[i].Time - cubes[i - 1].Time <= 0.25 && Helper.IsSlider(cubes[i - 1], cubes[i], cubes[i - 1].Direction, true))
+                        || cubes[i].Time - cubes[i - 1].Time < 0.125)
+                    {
+                        cubes[i].Pattern = true;
+                        cubes[i].Bomb = cubes[i - 1].Bomb;
+                        if (!cubes[i - 1].Pattern)
+                        {
+                            cubes[i - 1].Pattern = true;
+                            cubes[i - 1].Head = true;
+                        }
+                    }
+                    bomb = bombs.LastOrDefault(b => cubes[i - 1].Time < b.JsonTime && cubes[i].Time >= b.JsonTime && cubes[i].Line == b.PosX);
+                    if (bomb != null)
+                    {
+                        if (Helper.IsSameDirection(cubes[i - 1].Direction, cubes[i].Direction))
+                        {
+                            cubes[i].Bomb = true;
+                        }
+                    }
+                    continue;
+                }
+            }
+
+            for (int i = 2; i < cubes.Count() - 2; i++)
+            {
+                if (cubes[i].CutDirection == 8 && cubes[i].Time - cubes[i - 1].Time >= 0.125) // If a dot note only flow from one way
+                {
+                    if ((Helper.IsSameDirection(cubes[i].Direction, cubes[i - 1].Direction) && !Helper.IsSameDirection(cubes[i].Direction, cubes[i + 1].Direction)) 
+                        || (!Helper.IsSameDirection(cubes[i].Direction, cubes[i - 1].Direction) && Helper.IsSameDirection(cubes[i].Direction, cubes[i + 1].Direction)))
+                    {
+                        if (!Helper.IsSameDirection(cubes[i].Direction + testValue, cubes[i - 1].Direction) && !Helper.IsSameDirection(cubes[i].Direction + testValue, cubes[i + 1].Direction))
+                        {
+                            cubes[i].Direction = Helper.Mod(cubes[i].Direction + testValue, 360);
+                        }
+                        else if (!Helper.IsSameDirection(cubes[i].Direction - testValue, cubes[i - 1].Direction) && !Helper.IsSameDirection(cubes[i].Direction - testValue, cubes[i + 1].Direction))
+                        {
+                            cubes[i].Direction = Helper.Mod(cubes[i].Direction - testValue, 360);
+                        }
+                    }
+                }
+            }
+
+            if (cubes.Last().CutDirection == 8)
+            {
+                if ((cubes.Last().Time - cubes[cubes.Count() - 2].Time <= 0.125 && Helper.IsSlider(cubes[cubes.Count() - 2], cubes.Last(), cubes[cubes.Count() - 2].Direction, true)) || cubes.Last().Time - cubes[cubes.Count() - 2].Time <= 0.125)
+                {
+                    cubes.Last().Direction = Helper.FindAngleViaPosition(cubes, cubes.Count - 1, cubes.Count - 2, cubes[cubes.Count() - 2].Direction, true);
+                    if (cubes[cubes.Count() - 2].CutDirection == 8)
+                    {
+                        cubes[cubes.Count() - 2].Direction = cubes.Last().Direction;
+                    }
+                    cubes.Last().Pattern = true;
+                    cubes[cubes.Count() - 2].Pattern = true;
+                    cubes[cubes.Count() - 2].Head = true;
+                }
+                else
+                {
+                    bomb = bombs.LastOrDefault(b => cubes[cubes.Count() - 2].Time < b.JsonTime && cubes.Last().Time >= b.JsonTime && cubes.Last().Line == b.PosX);
+                    if (bomb != null)
+                    {
+                        if (bomb.PosY == 0)
+                        {
+                            cubes.Last().Direction = 270;
+                        }
+                        else if (bomb.PosY == 1)
+                        {
+                            if (cubes.Last().Layer == 0)
+                            {
+                                cubes.Last().Direction = 90;
+                            }
+                            else
+                            {
+                                cubes.Last().Direction = 270;
+                            }
+                        }
+                        else if (bomb.PosY == 2)
+                        {
+                            cubes.Last().Direction = 90;
+                        }
+                        cubes.Last().Bomb = true;
+                    }
+                    else
+                    {
+                        cubes.Last().Direction = Helper.FindAngleViaPosition(cubes, cubes.Count - 1, cubes.Count - 2, cubes[cubes.Count() - 2].Direction, false);
+                    }
+                }
+            }
+            else
+            {
+                if ((cubes.Last().Time - cubes[cubes.Count() - 2].Time <= 0.125 && Helper.IsSlider(cubes[cubes.Count() - 2], cubes.Last(), cubes[cubes.Count() - 2].Direction, true)) || cubes.Last().Time - cubes[cubes.Count() - 2].Time <= 0.125)
+                {
+                    cubes[cubes.Count() - 2].Head = true;
+                    cubes[cubes.Count() - 2].Pattern = true;
+                    cubes.Last().Pattern = true;
+                }
+                cubes.Last().Direction = Helper.Mod(CutDirectionIndex[cubes.Last().CutDirection] + cubes.Last().AngleOffset, 360);
+                bomb = bombs.LastOrDefault(b => cubes[cubes.Count - 2].Time < b.JsonTime && cubes.Last().Time >= b.JsonTime && cubes.Last().Line == b.PosX);
+                if (bomb != null)
+                {
+                    cubes.Last().Bomb = true;
+                }
+            }
         }
 
         #endregion
@@ -85,129 +427,43 @@ namespace BeatmapScanner.Algorithm.LackWiz
         public static List<SwingData> SwingProcesser(List<Cube> cubes)
         {
             var swingData = new List<SwingData>();
-            double first = 0;
 
             if(cubes.Count() == 0)
             {
                 return swingData;
             }
 
-            if (cubes[0].Note.CutDirection == 8)
+            swingData.Add(new SwingData(cubes[0].Time, cubes[0].Direction));
+            (swingData.Last().EntryPosition, swingData.Last().ExitPosition) = MathWiz.CalculateBaseEntryExit((cubes[0].Line, cubes[0].Layer), cubes[0].Direction);
+
+            for (int i = 1; i < cubes.Count - 1; i++)
             {
-                var c = cubes.Where(ca => ca.Note.CutDirection != 8).FirstOrDefault();
-                if (c != null)
+                var previousAngle = swingData.Last().Angle;
+
+                var currentBeat = cubes[i].Time;
+                var currentAngle = cubes[i].Direction;
+                (double x, double y) currentPosition = (cubes[i].Line, cubes[i].Layer);
+
+                if (!cubes[i].Pattern || cubes[i].Head)
                 {
-                    first = CutDirectionIndex[c.Note.CutDirection] + c.Note.AngleOffset;
-                    for(int i = cubes.IndexOf(c); i > 1 ; i--)
-                    {
-                        if (cubes[i].Beat - cubes[i - 1].Beat >= 0.25)
-                        {
-                            first = Helper.ReverseCutDirection(first);
-                        }
-                    }
+                    swingData.Add(new SwingData(currentBeat, currentAngle));
+                    (swingData.Last().EntryPosition, swingData.Last().ExitPosition) = MathWiz.CalculateBaseEntryExit(currentPosition, currentAngle);
                 }
                 else
                 {
-                    if (cubes[0].Note.PosY == 2)
-                    {
-                        first = 90;
-                    }
-                    else
-                    {
-                        first = 270;
-                    }
-                }
-            }
-            else
-            {
-                first = CutDirectionIndex[cubes[0].Note.CutDirection] + cubes[0].Note.AngleOffset;
-            }
-
-            swingData.Add(new SwingData(cubes[0].Note.Time, first)); ;
-            (swingData.Last().EntryPosition, swingData.Last().ExitPosition) = MathWiz.CalculateBaseEntryExit((cubes[0].Note.PosX, cubes[0].Note.PosY), first);
-
-            Helper.FixPatternHead(cubes);
-
-            for (int i = 1; i < cubes.Count; i++)
-            {
-                if (cubes[0].Beat == cubes[i].Beat && cubes[i].Note.CutDirection == 8 && cubes[i - 1].Note.CutDirection == 8)
-                {
-                    continue;
-                }
-
-                var pattern = false;
-
-                var previousBeat = cubes[i - 1].Beat;
-                var previousAngle = swingData.Last().Angle;
-                (double x, double y) previousPosition = (cubes[i - 1].Note.PosX, cubes[i - 1].Note.PosY);
-
-                var currentBeat = cubes[i].Beat;
-                var currentAngle = CutDirectionIndex[cubes[i].Note.CutDirection] + cubes[i].Note.AngleOffset;
-                (double x, double y) currentPosition = (cubes[i].Note.PosX, cubes[i].Note.PosY);
-
-                if (cubes[i].Note.CutDirection == 8)
-                {
-                    currentAngle = Helper.ReverseCutDirection(previousAngle);
-                }
-
-                if(currentBeat - previousBeat < 0.125 && (currentAngle == previousAngle || cubes[i].Note.CutDirection == 8 
-                    || cubes[i - 1].Note.CutDirection == 8))
-                {
-                    pattern = true;
-                }
-                else if(currentBeat - previousBeat < 0.5 && Helper.IsSameDirection(previousAngle, currentAngle))
-                {
-                    pattern = true;
-                }
-
-                if (cubes[i].Note.CutDirection == 8 && !pattern)
-                {
-                    swingData.Add(new SwingData(currentBeat, Helper.ReverseCutDirection(previousAngle)));
-                    (swingData.Last().EntryPosition, swingData.Last().ExitPosition) = MathWiz.CalculateBaseEntryExit(currentPosition, Helper.ReverseCutDirection(previousAngle));
-                }
-                else if(pattern)
-                {
-                    for (int f = i; f > 0; f--) // Find pattern head
-                    {
-                        if (cubes[f].Beat - cubes[f - 1].Beat >= 0.25)
-                        {
-                            previousBeat = cubes[f].Beat;
-                            previousPosition = (cubes[f].Note.PosX, cubes[f].Note.PosY);
-                            break;
-                        }
-                        if(f == 1)
-                        {
-                            previousBeat = cubes[0].Beat;
-                            previousPosition = (cubes[0].Note.PosX, cubes[0].Note.PosY);
-                        }
-                    }
-
-                    currentAngle = Helper.Mod(MathWiz.ConvertRadiansToDegrees(Math.Atan2(previousPosition.y - currentPosition.y, previousPosition.x - currentPosition.x)), 360);
-                    double guideAngle = 270;
-                    if (swingData.Count() > 1)
-                    {
-                        guideAngle = Helper.Mod((swingData[swingData.Count() - 2].Angle - 180), 360);
-                    }
-
                     for (int f = i; f > 0; f--)
                     {
-                        if (cubes[f].Beat < previousBeat)
+                        if (cubes[f].Head)
                         {
-                            break;
-                        }
-                        if (cubes[f].Note.CutDirection != 8)
-                        {
-                            guideAngle = CutDirectionIndex[cubes[f].Note.CutDirection] + cubes[f].Note.AngleOffset;
+                            currentAngle = Helper.FindAngleViaPosition(cubes, i, f, previousAngle, true);
                             break;
                         }
                     }
-                    if (Math.Abs(currentAngle - guideAngle) > 90)
+                    if(!Helper.IsSameDirection(currentAngle, previousAngle))
                     {
                         currentAngle = Helper.ReverseCutDirection(currentAngle);
                     }
-
                     swingData.Last().Angle = currentAngle;
-
                     var xtest = (swingData.Last().EntryPosition.x - (currentPosition.x * 0.333333 - Math.Cos(MathWiz.ConvertDegreesToRadians(currentAngle)) * 0.166667 + 0.166667)) * Math.Cos(MathWiz.ConvertDegreesToRadians(currentAngle));
                     var ytest = (swingData.Last().EntryPosition.y - (currentPosition.y * 0.333333 - Math.Sin(MathWiz.ConvertDegreesToRadians(currentAngle)) * 0.166667 + 0.166667)) * Math.Sin(MathWiz.ConvertDegreesToRadians(currentAngle));
                     if (xtest <= 0.001 && ytest >= 0.001)
@@ -218,11 +474,6 @@ namespace BeatmapScanner.Algorithm.LackWiz
                     {
                         swingData.Last().ExitPosition = (currentPosition.x * 0.333333 + Math.Cos(MathWiz.ConvertDegreesToRadians(currentAngle)) * 0.166667 + 0.166667, currentPosition.y * 0.333333 + Math.Sin(MathWiz.ConvertDegreesToRadians(currentAngle)) * 0.166667 + 0.166667);
                     }
-                }
-                else if(!pattern)
-                {
-                    swingData.Add(new SwingData(currentBeat, currentAngle));
-                    (swingData.Last().EntryPosition, swingData.Last().ExitPosition) = MathWiz.CalculateBaseEntryExit(currentPosition, currentAngle);
                 }
             }
 
@@ -353,6 +604,7 @@ namespace BeatmapScanner.Algorithm.LackWiz
             {
                 var testData1 = patternData[p];
                 var testData2 = DeepCopy(patternData[p]);
+
                 for (int i = 0; i < testData1.Count(); i++)
                 {
                     if (i > 0)
@@ -370,8 +622,8 @@ namespace BeatmapScanner.Algorithm.LackWiz
                     }
                     else
                     {
-                        testData1[0].Forehand = true;
                         testData1[0].Reset = false;
+                        testData1[0].Forehand = true;
                     }
                 }
                 for (int i = 0; i < testData2.Count(); i++)
@@ -391,8 +643,8 @@ namespace BeatmapScanner.Algorithm.LackWiz
                     }
                     else
                     {
-                        testData2[0].Forehand = false;
                         testData2[0].Reset = false;
+                        testData2[0].Forehand = false;
                     }
                 }
 
@@ -409,7 +661,7 @@ namespace BeatmapScanner.Algorithm.LackWiz
             }
             for (int i = 0; i < newPatternData.Count(); i++)
             {
-                newPatternData[i].AngleStrain = MathWiz.SwingAngleStrainCalc(new List<SwingData> { newPatternData[i] }, leftOrRight);
+                newPatternData[i].AngleStrain = MathWiz.SwingAngleStrainCalc(new List<SwingData> { newPatternData[i] }, leftOrRight) * 2;
             }
 
             return newPatternData;
@@ -429,7 +681,6 @@ namespace BeatmapScanner.Algorithm.LackWiz
             double pathLookback;
             (double x, double y) simHandCurPos;
             (double x, double y) simHandPrePos;
-            double positionDiff;
             double curveComplexity;
             double pathAngleStrain;
             double positionComplexity;
@@ -470,7 +721,7 @@ namespace BeatmapScanner.Algorithm.LackWiz
                         angleChangeList.Add(180 - Math.Abs(Math.Abs(angleList.Last() - angleList[angleList.Count() - 2]) - 180));
                     }
                 }
-
+                distance -= 0.75;
                 if (i > 1)
                 {
                     simHandCurPos = swingData[i].EntryPosition;
@@ -491,8 +742,7 @@ namespace BeatmapScanner.Algorithm.LackWiz
                     {
                         simHandPrePos = simHandCurPos;
                     }
-                    positionDiff = Math.Sqrt(Math.Pow(simHandCurPos.y - simHandPrePos.y, 2) + Math.Pow(simHandCurPos.x - simHandPrePos.x, 2));
-                    positionComplexity = Math.Pow(positionDiff, 2);
+                    positionComplexity = Math.Pow(Math.Sqrt(Math.Pow(simHandCurPos.y - simHandPrePos.y, 2) + Math.Pow(simHandCurPos.x - simHandPrePos.x, 2)), 2);
                 }
 
                 var lengthOfList = angleChangeList.Count() * 0.6;
@@ -530,20 +780,15 @@ namespace BeatmapScanner.Algorithm.LackWiz
 
         #region DiffToPass
 
-        public static double DiffToPass(List<SwingData> swingData, double bpm)
+
+        public static List<SwingData> CalcSwingDiff(List<SwingData> swingData, double bpm)
         {
-            if (swingData.Count() < 2)
+            if (swingData.Count() == 0)
             {
-                return 0;
+                return swingData;
             }
-
             var bps = bpm / 60;
-            var qDiff = new Queue<double>();
-            double windowDiff;
-            double window = 50;
-            var difficultyIndex = new List<double>();
             var data = new List<SData>();
-
             swingData[0].SwingDiff = 0;
             for (int i = 1; i < swingData.Count(); i++)
             {
@@ -559,8 +804,25 @@ namespace BeatmapScanner.Algorithm.LackWiz
                 data.Last().HitDiff = data.Last().HitDistance / (data.Last().HitDistance + 2) + 1;
                 data.Last().Stress = (swingData[i].AngleStrain + swingData[i].PathStrain) * data.Last().HitDiff;
                 swingData[i].SwingDiff = data.Last().SwingSpeed * (-1 * Math.Pow(1.4, -data.Last().SwingSpeed) + 1) * (data.Last().Stress / (data.Last().Stress + 2) + 1);
+            }
 
-                if (i > window)
+            return swingData;
+        }
+
+
+        public static double DiffToPass(List<SwingData> swingData, int WINDOW)
+        {
+            if (swingData.Count() < 2)
+            {
+                return 0;
+            }
+
+            var qDiff = new Queue<double>();
+            var difficultyIndex = new List<double>();
+
+            for (int i = 1; i < swingData.Count(); i++)
+            {
+                if (i > WINDOW)
                 {
                     qDiff.Dequeue();
                 }
@@ -568,17 +830,11 @@ namespace BeatmapScanner.Algorithm.LackWiz
                 List<double> tempList = qDiff.ToList();
                 tempList.Sort();
                 tempList.Reverse();
-
-                var temp = tempList.Take((int)(tempList.Count() * 25d / window));
-                if(temp.Count() > 1)
+                if (i >= WINDOW)
                 {
-                    windowDiff = temp.Sum() / 25 * 0.8;
+                    var windowDiff = tempList.Average() * 0.8;
+                    difficultyIndex.Add(windowDiff);
                 }
-                else
-                {
-                    windowDiff = 0;
-                }
-                difficultyIndex.Add(windowDiff);
             }
 
             if(difficultyIndex.Count > 0)
@@ -606,13 +862,13 @@ namespace BeatmapScanner.Algorithm.LackWiz
             swingDiffList.Sort();
             swingDiffList.Reverse();
             var averageDiff = swingDiffList.Take((int)(swingDiffList.Count() * 0.5)).Average();
-            var burstDiff = swingDiffList.Take(Math.Min(swingDiffList.Count() / 8, 2)).Average();
+            var burstDiff = swingDiffList.Take((int)(swingDiffList.Count() * 0.2)).Average();
             if(burstDiff == 0)
             {
                 return 0;
             }
             var staminaRatio = averageDiff / burstDiff;
-            return 1 / (10 + Math.Pow(4, -64 * (staminaRatio - 0.875))) + 0.9 + staminaRatio / 20;
+            return 1 / (20 + Math.Pow(4, -35 * (staminaRatio - 0.9))) + 0.9 + staminaRatio / 20;
         }
 
         #endregion
